@@ -1,0 +1,108 @@
+---
+title: "Predicting the manner in which the exercise was done"
+author: "Ben Imchen"
+date: "Tuesday, June 16, 2015"
+output: html_document
+---
+
+### Loading data
+The training data for this project are here: <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>  
+The test data are here: <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>  
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har.>  
+Download the training and testing dataset to the current working directory.
+```{r, echo=TRUE}
+training <- read.csv("pml-training.csv",na.strings=c("NA","","#DIV/0!"))
+testing <- read.csv("pml-testing.csv",na.strings=c("NA","","#DIV/0!"))
+```
+### Cleaning data
+```{r, echo=TRUE}
+training$X <- NULL
+testing$X <- NULL
+```
+Count NA occurance in each variable
+```{r, echo=TRUE}
+na.count <- data.frame(var.name=names(training), freq=colSums(is.na(training)))
+table(na.count$freq)
+dim(training)
+```
+Variables with NA values have high percentage of occurance, hence we will extract only the variables with no NA value. Also the first six variables looks irrevelant.
+```{r, echo=TRUE}
+vars <- as.character(rownames(na.count[na.count$freq==0,])[-(1:6)])
+```
+### Building a machine learning algorithm
+We will use the caret package to build a model using the default configuartions except for cross validation we will choose k-fold validation. Trying out all appropriate models available in the caret package and finding the right k-fold is a time consuming process and putting all these steps in this report for reproducibility is not a good idea as it will take a long time to produce the report. Outside this report I have tried few models starting with 10 fold, 8 fold... and so on till 2 fold. See table below showing the accuracies for all the models and the k-folds tried out. In this report we will the best 3 models from this list i.e. model # 2, 3 & 7 with 3-fold cross validation to build a machine learning algorithm.
+
+|#|Model|10 fold|8 fold|5 fold|3 fold|2 fold|
+|---:|:---|---:|---:|---:|---:|---:|
+|1|rpart|0.4962|0.4962|0.4962|||
+|2|rf|0.9883|0.9888|0.9904|0.9910|0.9902|
+|3|gbm|0.9578|0.9569|0.9579|0.9581|0.9564|
+|4|lda|0.7025|0.7025|0.7025|||
+|5|lssvmRadial|0.8010|||||
+|6|svmLinear|0.7812|||||
+|7|svmPoly|0.9920|0.9920|0.9901|0.9901|0.9901|
+|8|svmRadial|0.9214|0.9207||||
+|9|svmRadialCost|0.9209|0.9209||||
+|10|nnet|0.4135|||||
+|11|elm|0.3233|||||
+|12|avNNet|0.3728|||||
+
+```{r, echo=TRUE, message=FALSE}
+library(caret)
+set.seed(777)
+trainIndex <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+trainData <- training[trainIndex,vars]
+testData <- training[-trainIndex,vars]
+fitControl <- trainControl(method = "cv", number = 3)
+```
+
+```{r, echo=TRUE, cache=TRUE, message=FALSE}
+rf <- train(classe~., method="rf", data=trainData, trControl = fitControl)
+predrf <- predict(rf,testData)
+```
+Accuracy of random forest.
+```{r, echo=TRUE, cache=TRUE, message=FALSE}
+confusionMatrix(testData$classe, predrf)$overall[1]
+gbm <- train(classe~., method="gbm", data=trainData, trControl = fitControl)
+predgbm <- predict(gbm,testData)
+```
+Accuracy of gradient boost model.
+```{r, echo=TRUE, message=FALSE}
+confusionMatrix(testData$classe, predgbm)$overall[1]
+svm <- train(classe~., method="svmPoly", data=trainData, trControl = fitControl)
+predsvm <- predict(svm,testData)
+```
+Accuracy of support vector machine.
+```{r, echo=TRUE}
+confusionMatrix(testData$classe, predsvm)$overall[1]
+```
+Let's further blend the models and see whether the prediction accuracy increases.
+```{r,echo=TRUE}
+predall <- data.frame(predrf,predgbm,predsvm,classe=testData$classe)
+fit <- train(classe~.,data=predall,method="rf")
+```
+Accuracy increases after blending the models.
+```{r, echo=TRUE}
+confusionMatrix(predall$classe,predict(fit,predall))$overall[1]
+```
+Expected out of sample error.
+```{r, echo=TRUE}
+1 - as.numeric(confusionMatrix(predall$classe,predict(fit,predall))$overall[1])
+```
+
+### Submission
+```{r, echo=TRUE}
+vpredrf <- predict(rf,testing[,vars[-53]])
+vpredgbm <- predict(gbm,testing[,vars[-53]])
+vpredsvm <- predict(svm,testing[,vars[-53]])
+vpredall <- data.frame(predrf=vpredrf,predgbm=vpredgbm,predsvm=vpredsvm)
+answers <- predict(fit,vpredall)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
